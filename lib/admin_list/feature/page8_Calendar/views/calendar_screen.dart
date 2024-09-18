@@ -72,7 +72,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 _selectedDay = selectedDay;
                 _focusedDay = focusedDay;
               });
-              context.read<EventBloc>().add(LoadEventsForDay(selectedDay));
+              context.read<EventBloc>().add(LoadEvents());
             },
             onFormatChanged: (format) {
               setState(() {
@@ -85,17 +85,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
               });
             },
             calendarBuilders: CalendarBuilders(
-              markerBuilder: (context, day, _) {
+              markerBuilder: (context, day, events) {
                 final eventBlocState = context.watch<EventBloc>().state;
-
                 if (eventBlocState is EventLoadSuccess) {
                   final dayEvents = eventBlocState.events.where((event) {
-                    final startDate = event.startTime;
-                    final endDate = event.endTime.isBefore(startDate)
-                        ? startDate
-                        : event.endTime;
-                    return day.isAfter(startDate.subtract(Duration(days: 1))) &&
-                        day.isBefore(endDate);
+                    return day.isAtSameMomentAs(event.startTime) ||
+                        (day.isAfter(event.startTime) &&
+                            day.isBefore(event.endTime)) ||
+                        day.isAtSameMomentAs(event.endTime);
                   }).toList();
 
                   if (dayEvents.isNotEmpty) {
@@ -112,7 +109,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     );
                   }
                 }
-
                 return null;
               },
             ),
@@ -121,11 +117,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
               if (state is EventLoadSuccess) {
                 return state.events.where((event) {
                   final startDate = event.startTime;
-                  final endDate = event.endTime.isBefore(startDate)
-                      ? startDate
-                      : event.endTime;
-                  return day.isAfter(startDate.subtract(Duration(days: 1))) &&
-                      day.isBefore(endDate);
+                  final endDate = event.endTime;
+
+                  // 이벤트의 시작과 끝 날짜가 같은 경우
+                  if (isSameDay(day, startDate) || isSameDay(day, endDate)) {
+                    return true;
+                  }
+
+                  // 이벤트의 기간이 해당 날짜를 포함하는 경우
+                  return (day.isAfter(startDate) && day.isBefore(endDate)) ||
+                      (isSameDay(day, startDate) || isSameDay(day, endDate));
                 }).toList();
               }
               return [];
@@ -136,11 +137,36 @@ class _CalendarScreenState extends State<CalendarScreen> {
             builder: (context, state) {
               if (state is EventLoadSuccess) {
                 final events = state.events
-                    .where((event) =>
-                        event.startTime
-                            .isBefore(_selectedDay.add(Duration(days: 1))) &&
-                        event.endTime
-                            .isAfter(_selectedDay.subtract(Duration(days: 1))))
+                    .where((event) {
+                      final eventStart = event.startTime;
+                      final eventEnd = event.endTime;
+
+                      // selectedDay의 시작과 종료 범위 설정
+                      final startOfSelectedDay = DateTime(
+                        _selectedDay.year,
+                        _selectedDay.month,
+                        _selectedDay.day,
+                      );
+                      final endOfSelectedDay = DateTime(
+                          _selectedDay.year,
+                          _selectedDay.month,
+                          _selectedDay.day,
+                          23,
+                          59,
+                          59,
+                          999);
+
+                      // 이벤트가 선택된 날짜 범위와 겹치는지 확인
+                      final isWithinRange = eventStart.isBefore(endOfSelectedDay
+                              .add(Duration(milliseconds: 1))) &&
+                          eventEnd.isAfter(startOfSelectedDay
+                              .subtract(Duration(milliseconds: 1)));
+
+                      print(
+                          'Event: ${event.title}, Start: $eventStart, End: $eventEnd, Selected Day Start: $startOfSelectedDay, Selected Day End: $endOfSelectedDay, Is Within Range: $isWithinRange');
+
+                      return isWithinRange;
+                    })
                     .where((event) =>
                         _searchQuery.isEmpty ||
                         event.title
@@ -182,11 +208,59 @@ class _CalendarScreenState extends State<CalendarScreen> {
               builder: (context, state) {
                 if (state is EventLoadSuccess) {
                   final events = state.events
-                      .where((event) =>
-                          event.startTime
-                              .isBefore(_selectedDay.add(Duration(days: 1))) &&
-                          event.endTime.isAfter(
-                              _selectedDay.subtract(Duration(days: 1))))
+                      .where((event) {
+                        final eventStart = event.startTime;
+                        final eventEnd = event.endTime;
+
+                        // 선택된 날짜의 시작과 종료 범위 설정
+                        final startOfSelectedDay = DateTime(
+                          _selectedDay.year,
+                          _selectedDay.month,
+                          _selectedDay.day,
+                        );
+                        final endOfSelectedDay = DateTime(
+                          _selectedDay.year,
+                          _selectedDay.month,
+                          _selectedDay.day,
+                          23,
+                          59,
+                          59,
+                          999,
+                        );
+
+                        // 로그 찍기: 선택된 날짜 범위
+                        print('Selected Day Start: $startOfSelectedDay');
+                        print('Selected Day End: $endOfSelectedDay');
+
+                        // 이벤트의 시작과 끝 시간이 선택된 날짜 범위와 겹치는지 확인
+                        final isStartWithinRange = eventStart.isBefore(
+                                endOfSelectedDay
+                                    .add(Duration(milliseconds: 1))) &&
+                            eventStart.isAfter(startOfSelectedDay
+                                .subtract(Duration(milliseconds: 1)));
+                        final isEndWithinRange = eventEnd.isAfter(
+                                startOfSelectedDay
+                                    .subtract(Duration(milliseconds: 1))) &&
+                            eventEnd.isBefore(endOfSelectedDay
+                                .add(Duration(milliseconds: 1)));
+
+                        // 로그 찍기: 이벤트 시작 및 끝 날짜
+                        print('Event Start: $eventStart');
+                        print('Event End: $eventEnd');
+                        print('Is Start Within Range: $isStartWithinRange');
+                        print('Is End Within Range: $isEndWithinRange');
+
+                        // 선택된 날짜 범위와 겹치는지 확인
+                        final isWithinRange = isStartWithinRange ||
+                            isEndWithinRange ||
+                            (eventStart.isBefore(startOfSelectedDay) &&
+                                eventEnd.isAfter(endOfSelectedDay));
+
+                        // 로그 찍기: 최종 결과
+                        print('Is Within Range: $isWithinRange');
+
+                        return isWithinRange;
+                      })
                       .where((event) =>
                           _searchQuery.isEmpty ||
                           event.title
@@ -289,12 +363,11 @@ class EventSearchDelegate extends SearchDelegate<String> {
 
   @override
   Widget buildResults(BuildContext context) {
-    final eventBloc = context.read<EventBloc>();
-    final state = eventBloc.state;
+    final eventBlocState = context.watch<EventBloc>().state;
     List<Event> results = [];
 
-    if (state is EventLoadSuccess) {
-      results = state.events.where((event) {
+    if (eventBlocState is EventLoadSuccess) {
+      results = eventBlocState.events.where((event) {
         return event.title.toLowerCase().contains(query.toLowerCase());
       }).toList();
     }
@@ -323,12 +396,11 @@ class EventSearchDelegate extends SearchDelegate<String> {
 
   @override
   Widget buildSuggestions(BuildContext context) {
-    final eventBloc = context.read<EventBloc>();
-    final state = eventBloc.state;
+    final eventBlocState = context.watch<EventBloc>().state;
     List<Event> suggestions = [];
 
-    if (state is EventLoadSuccess) {
-      suggestions = state.events.where((event) {
+    if (eventBlocState is EventLoadSuccess) {
+      suggestions = eventBlocState.events.where((event) {
         return event.title.toLowerCase().contains(query.toLowerCase());
       }).toList();
     }
